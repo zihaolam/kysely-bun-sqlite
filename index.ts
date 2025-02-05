@@ -7,6 +7,7 @@ import {
   SelectQueryNode,
   sql,
   DialectAdapterBase,
+  InsertQueryNode,
 } from "kysely";
 import type {
   DatabaseConnection,
@@ -133,25 +134,15 @@ class BunSqliteConnection implements DatabaseConnection {
       });
     }
 
-    const result = this.#db
-      .query<
-        {
-          insertId: number | bigint;
-          numAffectedRows: number | bigint;
-        },
-        []
-      >(
-        `select last_insert_rowid() as "insertId", changes() as "numAffectedRows"`
-      )
-      .get() ?? {
-      insertId: 0n,
-      numAffectedRows: 0n,
-    };
+    const numAffectedRows = this.#db
+      .query(`select changes()`)
+      .values()?.[0]?.[0] as number | bigint | undefined;
+
+    // NOTE(kenta): insertId is not provided by SQLite.
 
     return Promise.resolve({
       rows,
-      insertId: BigInt(result.insertId),
-      numAffectedRows: BigInt(result.numAffectedRows),
+      numAffectedRows: BigInt(numAffectedRows ?? 0n),
     });
   }
 
