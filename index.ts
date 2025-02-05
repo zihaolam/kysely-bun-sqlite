@@ -125,8 +125,33 @@ class BunSqliteConnection implements DatabaseConnection {
   }: CompiledQuery): Promise<QueryResult<O>> {
     const method = SelectQueryNode.is(query) ? "query" : "prepare";
     const stmt = this.#db[method]<O, SQLQueryBindings[]>(sql);
+
+    const rows = stmt.all(...((parameters || []) as SQLQueryBindings[]));
+    if (method === "query") {
+      return Promise.resolve({
+        rows: stmt.all(...((parameters || []) as SQLQueryBindings[])),
+      });
+    }
+
+    const result = this.#db
+      .query<
+        {
+          insertId: number | bigint;
+          numAffectedRows: number | bigint;
+        },
+        []
+      >(
+        `select last_insert_rowid() as "insertId", changes() as "numAffectedRows"`
+      )
+      .get() ?? {
+      insertId: 0n,
+      numAffectedRows: 0n,
+    };
+
     return Promise.resolve({
-      rows: stmt.all(...((parameters || []) as SQLQueryBindings[])),
+      rows,
+      insertId: BigInt(result.insertId),
+      numAffectedRows: BigInt(result.numAffectedRows),
     });
   }
 
