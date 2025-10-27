@@ -72,14 +72,14 @@ export class BunSqliteDialect implements Dialect {
 export class BunSqliteDriver implements Driver {
   readonly #config: BunSqliteDialectConfig;
   readonly #connectionMutex = new AsyncMutex();
-  readonly #transactionMutex: AsyncMutex;
+  readonly #transactionMutex?: AsyncMutex;
 
   #db?: Database;
   #connection?: DatabaseConnection;
 
   constructor(config: BunSqliteDialectConfig) {
     this.#config = { ...config };
-    this.#transactionMutex = config.transactionMutex ?? new AsyncMutex();
+    this.#transactionMutex = config.transactionMutex;
   }
 
   async init(): Promise<void> {
@@ -104,7 +104,7 @@ export class BunSqliteDriver implements Driver {
   }
 
   async beginTransaction(connection: DatabaseConnection): Promise<void> {
-    await this.#transactionMutex.lock();
+    await this.#transactionMutex?.lock();
     await connection.executeQuery(CompiledQuery.raw("begin"));
   }
 
@@ -112,7 +112,7 @@ export class BunSqliteDriver implements Driver {
     try {
       await connection.executeQuery(CompiledQuery.raw("commit"));
     } finally {
-      this.#transactionMutex.unlock();
+      this.#transactionMutex?.unlock();
     }
   }
 
@@ -120,7 +120,7 @@ export class BunSqliteDriver implements Driver {
     try {
       await connection.executeQuery(CompiledQuery.raw("rollback"));
     } finally {
-      this.#transactionMutex.unlock();
+      this.#transactionMutex?.unlock();
     }
   }
 
