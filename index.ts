@@ -7,7 +7,6 @@ import {
   SelectQueryNode,
   sql,
   DialectAdapterBase,
-  InsertQueryNode,
 } from "kysely";
 import type {
   DatabaseConnection,
@@ -37,6 +36,13 @@ export interface BunSqliteDialectConfig {
    * Called once when the first query is executed.
    */
   onCreateConnection?: (connection: DatabaseConnection) => Promise<void>;
+
+  transactionMutex?: AsyncMutex;
+}
+
+interface AsyncMutex {
+  lock(): Promise<void>;
+  unlock(): void;
 }
 
 export class BunSqliteDialect implements Dialect {
@@ -65,13 +71,15 @@ export class BunSqliteDialect implements Dialect {
 
 export class BunSqliteDriver implements Driver {
   readonly #config: BunSqliteDialectConfig;
-  readonly #connectionMutex = new ConnectionMutex();
+  readonly #connectionMutex = new AsyncMutex();
+  readonly #transactionMutex: AsyncMutex;
 
   #db?: Database;
   #connection?: DatabaseConnection;
 
   constructor(config: BunSqliteDialectConfig) {
     this.#config = { ...config };
+    this.#transactionMutex = config.transactionMutex ?? new AsyncMutex();
   }
 
   async init(): Promise<void> {
@@ -96,15 +104,24 @@ export class BunSqliteDriver implements Driver {
   }
 
   async beginTransaction(connection: DatabaseConnection): Promise<void> {
+    await this.#transactionMutex.lock();
     await connection.executeQuery(CompiledQuery.raw("begin"));
   }
 
   async commitTransaction(connection: DatabaseConnection): Promise<void> {
-    await connection.executeQuery(CompiledQuery.raw("commit"));
+    try {
+      await connection.executeQuery(CompiledQuery.raw("commit"));
+    } finally {
+      this.#transactionMutex.unlock();
+    }
   }
 
   async rollbackTransaction(connection: DatabaseConnection): Promise<void> {
-    await connection.executeQuery(CompiledQuery.raw("rollback"));
+    try {
+      await connection.executeQuery(CompiledQuery.raw("rollback"));
+    } finally {
+      this.#transactionMutex.unlock();
+    }
   }
 
   async destroy(): Promise<void> {
@@ -154,14 +171,14 @@ class BunSqliteConnection implements DatabaseConnection {
     const method = SelectQueryNode.is(query) ? "query" : "prepare";
     const stmt = this.#db[method]<O, SQLQueryBindings[]>(sql);
     for (const row of stmt.iterate(
-      ...((parameters || []) as SQLQueryBindings[])
+      ...((parameters || []) as SQLQueryBindings[]),
     )) {
       yield { rows: [row] };
     }
   }
 }
 
-class ConnectionMutex {
+class AsyncMutex implements AsyncMutex {
   #promise?: Promise<void>;
   #resolve?: () => void;
 
@@ -215,7 +232,7 @@ export class BunSqliteIntrospector implements DatabaseIntrospector {
   }
 
   async getTables(
-    options: DatabaseMetadataOptions = { withInternalKyselyTables: false }
+    options: DatabaseMetadataOptions = { withInternalKyselyTables: false },
   ): Promise<TableMetadata[]> {
     let query = this.#db
       .selectFrom("sqlite_schema")
@@ -235,7 +252,7 @@ export class BunSqliteIntrospector implements DatabaseIntrospector {
   }
 
   async getMetadata(
-    options?: DatabaseMetadataOptions
+    options?: DatabaseMetadataOptions,
   ): Promise<DatabaseMetadata> {
     return {
       tables: await this.getTables(options),
@@ -267,7 +284,7 @@ export class BunSqliteIntrospector implements DatabaseIntrospector {
           type: string;
           notnull: 0 | 1;
           dflt_value: any;
-        }>`pragma_table_info(${table})`.as("table_info")
+        }>`pragma_table_info(${table})`.as("table_info"),
       )
       .select(["name", "type", "notnull", "dflt_value"])
       .execute();
