@@ -37,7 +37,7 @@ export interface BunSqliteDialectConfig {
    */
   onCreateConnection?: (connection: DatabaseConnection) => Promise<void>;
 
-  transactionMutex?: AsyncMutex;
+  transactionMutex?: ConnectionMutex;
 }
 
 interface AsyncMutex {
@@ -71,8 +71,8 @@ export class BunSqliteDialect implements Dialect {
 
 export class BunSqliteDriver implements Driver {
   readonly #config: BunSqliteDialectConfig;
-  readonly #connectionMutex = new AsyncMutex();
-  readonly #transactionMutex?: AsyncMutex;
+  readonly #connectionMutex = new ConnectionMutex();
+  readonly #transactionMutex?: ConnectionMutex;
 
   #db?: Database;
   #connection?: DatabaseConnection;
@@ -178,7 +178,7 @@ class BunSqliteConnection implements DatabaseConnection {
   }
 }
 
-class AsyncMutex implements AsyncMutex {
+class ConnectionMutex implements AsyncMutex {
   #promise?: Promise<void>;
   #resolve?: () => void;
 
